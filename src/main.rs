@@ -1,11 +1,11 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use iced::{
-    widget::{button, column, container, row, text_editor},
     Element,
     Length::Fill,
+    widget::{button, column, container, row, text, text_editor},
 };
 use reqwest::blocking::Client;
 
@@ -18,17 +18,44 @@ const URL_BEST_IP: &str =
 const URL_ALL_IP: &str =
     "https://raw.githubusercontent.com/ngosang/trackerslist/master/trackers_all_ip.txt";
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum List {
     Best,
     All,
     BestIp,
     AllIp,
+
+    Action(text_editor::Action),
 }
 
 #[derive(Default)]
 struct State {
     content: text_editor::Content,
+    error: Option<String>,
+}
+
+impl State {
+    fn handle_list_press(&mut self, list_url: &str) {
+        match get_trackers(list_url) {
+            Ok(text) => {
+                self.content = text_editor::Content::with_text(&text);
+                self.error = None;
+            }
+            Err(e) => {
+                self.content = text_editor::Content::with_text("");
+                self.error = Some(e.to_string());
+            }
+        }
+    }
+
+    fn perform_action_if(&mut self, action: text_editor::Action) {
+        match action {
+            text_editor::Action::SelectAll
+            | text_editor::Action::Scroll { lines: _ }
+            | text_editor::Action::Click(_) => self.content.perform(action),
+            _ => (),
+        }
+    }
 }
 
 fn main() -> iced::Result {
@@ -36,22 +63,34 @@ fn main() -> iced::Result {
 }
 
 fn update(state: &mut State, list: List) {
-    let text = match list {
-        List::Best => get_trackers(URL_BEST).unwrap(),
-        List::All => get_trackers(URL_ALL).unwrap(),
-        List::BestIp => get_trackers(URL_BEST_IP).unwrap(),
-        List::AllIp => get_trackers(URL_ALL_IP).unwrap(),
-    };
+    match list {
+        List::Best => state.handle_list_press(URL_BEST),
+        List::All => state.handle_list_press(URL_ALL),
+        List::BestIp => state.handle_list_press(URL_BEST_IP),
+        List::AllIp => state.handle_list_press(URL_ALL_IP),
 
-    state.content = text_editor::Content::with_text(&text);
+        List::Action(a) => state.perform_action_if(a),
+    }
 }
 
 fn view(state: &State) -> Element<List> {
+    let content_widget = text_editor(&state.content)
+        .placeholder("the trackers go here...")
+        .on_action(List::Action)
+        .height(Fill);
+    let display_area = if let Some(error) = &state.error {
+        column![
+            content_widget,
+            text(format!("Error: {error}")).color(iced::Color::new(1.0, 0.0, 0.0, 1.0))
+        ]
+        .spacing(10)
+    } else {
+        column![content_widget].spacing(10)
+    };
+
     container(
         column![
-            text_editor(&state.content)
-                .placeholder("the trackers go here...")
-                .height(Fill),
+            display_area,
             row![
                 button("Best").on_press(List::Best).width(Fill).padding(10),
                 button("All").on_press(List::All).width(Fill).padding(10),
