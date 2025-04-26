@@ -10,9 +10,8 @@ repository = "https://github.com/DarkCeptor44/trackers-gui"
 license = "MIT"
 
 [dependencies]
-anyhow = "^1"
 iced = { version = "^0.13", features = ["tokio"] }
-reqwest = { version = "^0.12", features = ["blocking", "rustls-tls"] }
+reqwest = { version = "^0.12", features = ["rustls-tls"] }
 
 [profile.dev]
 opt-level = 1
@@ -25,3 +24,7 @@ lto = true
 codegen-units = 1
 opt-level = "z"
 strip = true
+
+[[bin]]
+name = "trackers"
+path = "src/main.rs"

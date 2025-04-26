@@ -1,13 +1,14 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use anyhow::{Context, Result, anyhow};
 use iced::{
     Element,
     Length::Fill,
-    widget::{button, column, container, row, text, text_editor},
+    Theme,
+    task::Task,
+    widget::{Button, button, column, container, row, text, text_editor},
 };
-use reqwest::blocking::Client;
+use reqwest::Client;
 
 const URL_BEST: &str =
     "https://raw.githubusercontent.com/ngosang/trackerslist/master/trackers_best.txt";
@@ -18,34 +19,19 @@ const URL_BEST_IP: &str =
 const URL_ALL_IP: &str =
     "https://raw.githubusercontent.com/ngosang/trackerslist/master/trackers_all_ip.txt";
 
-#[derive(Debug, Clone)]
-enum List {
-    Best,
-    All,
-    BestIp,
-    AllIp,
-
-    Action(text_editor::Action),
-}
-
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct State {
     content: text_editor::Content,
     error: Option<String>,
+    is_fetching: bool,
 }
 
 impl State {
-    fn handle_list_press(&mut self, list_url: &str) {
-        match get_trackers(list_url) {
-            Ok(text) => {
-                self.content = text_editor::Content::with_text(&text);
-                self.error = None;
-            }
-            Err(e) => {
-                self.content = text_editor::Content::with_text("");
-                self.error = Some(e.to_string());
-            }
-        }
+    fn button<'f>(&self, text: &'f str, msg: List) -> Button<'f, List> {
+        button(text)
+            .on_press_maybe(if self.is_fetching { None } else { Some(msg) })
+            .width(Fill)
+            .padding(10)
     }
 
     fn perform_action_if(&mut self, action: text_editor::Action) {
@@ -58,24 +44,73 @@ impl State {
     }
 }
 
-fn main() -> iced::Result {
-    iced::run("TrackersGUI", update, view)
+#[derive(Debug, Clone)]
+enum List {
+    Best,
+    All,
+    BestIp,
+    AllIp,
+
+    Action(text_editor::Action),
+    Fetched(Result<String, String>),
 }
 
-fn update(state: &mut State, list: List) {
-    match list {
-        List::Best => state.handle_list_press(URL_BEST),
-        List::All => state.handle_list_press(URL_ALL),
-        List::BestIp => state.handle_list_press(URL_BEST_IP),
-        List::AllIp => state.handle_list_press(URL_ALL_IP),
+fn main() -> iced::Result {
+    iced::application("Trackers", update, view)
+        .theme(|_| Theme::TokyoNight)
+        .run()
+}
 
-        List::Action(a) => state.perform_action_if(a),
+fn update(state: &mut State, list: List) -> Task<List> {
+    match list {
+        List::Best => {
+            state.is_fetching = true;
+            state.error = None;
+            Task::perform(get_trackers(URL_BEST), List::Fetched)
+        }
+        List::All => {
+            state.is_fetching = true;
+            state.error = None;
+            Task::perform(get_trackers(URL_ALL), List::Fetched)
+        }
+        List::BestIp => {
+            state.is_fetching = true;
+            state.error = None;
+            Task::perform(get_trackers(URL_BEST_IP), List::Fetched)
+        }
+        List::AllIp => {
+            state.is_fetching = true;
+            state.error = None;
+            Task::perform(get_trackers(URL_ALL_IP), List::Fetched)
+        }
+        List::Action(a) => {
+            state.perform_action_if(a);
+            Task::none()
+        }
+        List::Fetched(result) => {
+            state.is_fetching = false;
+            match result {
+                Ok(text) => {
+                    state.content = text_editor::Content::with_text(&text);
+                    state.error = None;
+                }
+                Err(e) => {
+                    state.content = text_editor::Content::with_text("");
+                    state.error = Some(e);
+                }
+            }
+            Task::none()
+        }
     }
 }
 
 fn view(state: &State) -> Element<List> {
     let content_widget = text_editor(&state.content)
-        .placeholder("the trackers go here...")
+        .placeholder(if state.is_fetching {
+            "Fetching..."
+        } else {
+            "the trackers go here..."
+        })
         .on_action(List::Action)
         .height(Fill);
     let display_area = if let Some(error) = &state.error {
@@ -90,18 +125,13 @@ fn view(state: &State) -> Element<List> {
 
     container(
         column![
+            text("Trackers:"),
             display_area,
             row![
-                button("Best").on_press(List::Best).width(Fill).padding(10),
-                button("All").on_press(List::All).width(Fill).padding(10),
-                button("Best IP")
-                    .on_press(List::BestIp)
-                    .width(Fill)
-                    .padding(10),
-                button("All IP")
-                    .on_press(List::AllIp)
-                    .width(Fill)
-                    .padding(10),
+                state.button("Best", List::Best),
+                state.button("All", List::All),
+                state.button("Best IP", List::BestIp),
+                state.button("All IP", List::AllIp),
             ]
             .spacing(10)
             .width(Fill)
@@ -114,18 +144,25 @@ fn view(state: &State) -> Element<List> {
     .into()
 }
 
-fn get_trackers(url: &str) -> Result<String> {
+async fn get_trackers(url: &str) -> Result<String, String> {
     let client = Client::new();
-    let resp = client.get(url).send().context("Failed to get trackers")?;
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|_| format!("Failed to get trackers from `{url}`"))?;
 
     if !resp.status().is_success() {
-        return Err(anyhow!("Failed to get trackers from `{url}`"));
+        return Err(format!("Failed to get trackers from `{url}`"));
     }
 
-    let text = resp.text().context("Failed to get trackers text")?;
+    let text = resp
+        .text()
+        .await
+        .map_err(|_| "Failed to get trackers text")?;
 
     if text.trim().is_empty() {
-        return Err(anyhow!("Tracker list at `{url}` is empty"));
+        return Err(format!("Tracker list at `{url}` is empty"));
     }
 
     Ok(text)
