@@ -1,0 +1,30 @@
+[package]
+name = "trackersgui"
+version = "2.0.0"
+description = "GUI for public trackers"
+authors = ["DarkCeptor44"]
+edition = "2024"
+rust-version = "1.85"
+homepage = "https://github.com/DarkCeptor44/trackers-gui"
+repository = "https://github.com/DarkCeptor44/trackers-gui"
+license = "MIT"
+
+[dependencies]
+iced = { version = "^0.13", features = ["tokio"] }
+reqwest = { version = "^0.12", features = ["rustls-tls"] }
+
+[profile.dev]
+opt-level = 1
+codegen-units = 16
+debug = true
+incremental = true
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "z"
+strip = true
+
+[[bin]]
+name = "trackers"
+path = "src/main.rs"
